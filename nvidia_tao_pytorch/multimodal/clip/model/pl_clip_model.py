@@ -12,6 +12,14 @@ import torch.nn.functional as F
 
 _MAX_LOGIT_SCALE = math.log(100)
 
+
+def _initial_logit_scale_ceiling(logit_scale) -> float:
+    """Return a clamp ceiling that never truncates model initialization."""
+    if hasattr(logit_scale, "detach"):
+        logit_scale = logit_scale.detach().item()
+    return max(_MAX_LOGIT_SCALE, float(logit_scale))
+
+
 from open_clip.loss import ClipLoss, SigLipLoss  # noqa: E402
 
 from nvidia_tao_pytorch.core.tlt_logging import logging  # noqa: E402
@@ -234,6 +242,9 @@ class CLIPPlModel(TAOLightningModule):
             experiment_config=self.experiment_spec, export=export
         )
         self.model = clip_model.model
+        self._max_logit_scale = _initial_logit_scale_ceiling(
+            self.model.logit_scale
+        )
         self.tokenizer = clip_model.tokenizer
         self.preprocess_train, self.preprocess_val = (
             clip_model.preprocess_train,
@@ -338,8 +349,8 @@ class CLIPPlModel(TAOLightningModule):
                     world_size=siglip_loss_world_size,
                     rank=siglip_loss_rank,
                     accessory_aware=(
-                        siglip_mask_mode
-                        == "attribute_plus_accessory_match_ignore"
+                        siglip_mask_mode ==
+                        "attribute_plus_accessory_match_ignore"
                     ),
                 )
                 self.criterion = self.loss
@@ -417,6 +428,12 @@ class CLIPPlModel(TAOLightningModule):
     def on_train_start(self):
         """Training epoch start."""
         self.trainer.datamodule.resume_step = self.trainer.global_step
+        # Checkpoint restoration happens after __init__. Recompute the ceiling
+        # here so resumed checkpoints retain their stored calibration rather
+        # than being truncated to the historical exp(scale)=100 limit.
+        self._max_logit_scale = _initial_logit_scale_ceiling(
+            self.model.logit_scale
+        )
 
     def _forward_pass(self, batch):
         """Run forward pass."""
@@ -546,7 +563,7 @@ class CLIPPlModel(TAOLightningModule):
         )
 
         with torch.no_grad():
-            self.model.logit_scale.clamp_(0, _MAX_LOGIT_SCALE)
+            self.model.logit_scale.clamp_(0, self._max_logit_scale)
         return loss_value
 
     def on_train_epoch_end(self):

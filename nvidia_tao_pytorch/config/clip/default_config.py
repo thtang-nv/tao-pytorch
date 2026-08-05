@@ -75,8 +75,10 @@ class CLIPModelConfig:
         value=None,
         default_value=None,
         description="Override for the initial logit scale (log-space). "
-                    "When None, automatically set from train.loss_type: "
-                    "2.3026 (SigLIP) or 2.6592 (CLIP). "
+                    "For SigLIP2, None inherits the learned value from the "
+                    "pretrained checkpoint. Other model families infer a "
+                    "default from train.loss_type: 2.3026 (SigLIP) or "
+                    "2.6592 (CLIP). "
                     "Set manually only with caution, as incorrect values "
                     "can destabilize training.",
         display_name="Initial Logit Scale",
@@ -85,8 +87,10 @@ class CLIPModelConfig:
         value=None,
         default_value=None,
         description="Override for the initial logit bias. "
-                    "When None, automatically set from train.loss_type: "
-                    "-10.0 (SigLIP) or 0.0 (CLIP). "
+                    "For SigLIP2, None inherits the learned value from the "
+                    "pretrained checkpoint. Other model families infer a "
+                    "default from train.loss_type: -10.0 (SigLIP) or "
+                    "0.0 (CLIP). "
                     "Set manually only with caution, as incorrect values "
                     "can destabilize training.",
         display_name="Initial Logit Bias",
@@ -371,6 +375,8 @@ class CLIPDataLoaderConfig:
         description="Number of data loading worker processes.",
         display_name="Number of Workers",
     )
+
+
 @dataclass
 class CLIPTrainDataConfig(CLIPDataLoaderConfig):
     """Training data configuration with additional options for dataset type."""

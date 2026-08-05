@@ -63,14 +63,18 @@ def build_model(experiment_config,
 
     image_size = experiment_config.model.image_size
 
-    # Infer logit scale/bias from loss_type if not explicitly set
+    # Infer logit scale/bias from loss_type if not explicitly set. SigLIP2 is
+    # different: its Hugging Face checkpoint contains learned calibration
+    # parameters, so ``None`` must reach ``build_siglip2_model`` and be
+    # resolved from the pretrained backbone there.
     loss_type = getattr(experiment_config.train, 'loss_type', 'clip')
     init_logit_scale = experiment_config.model.init_logit_scale
     init_logit_bias = experiment_config.model.init_logit_bias
-    if init_logit_scale is None:
-        init_logit_scale = 2.3026 if loss_type == 'siglip' else 2.6592
-    if init_logit_bias is None:
-        init_logit_bias = -10.0 if loss_type == 'siglip' else 0.0
+    if model_name not in siglip2_model_configs:
+        if init_logit_scale is None:
+            init_logit_scale = 2.3026 if loss_type == 'siglip' else 2.6592
+        if init_logit_bias is None:
+            init_logit_bias = -10.0 if loss_type == 'siglip' else 0.0
 
     if model_name in radio_model_configs:
         adaptor_name = getattr(

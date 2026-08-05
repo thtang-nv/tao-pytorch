@@ -227,8 +227,8 @@ def build_siglip2_model(
     freeze_vision_encoder=False,
     freeze_text_encoder=False,
     image_size=384,
-    logit_scale_init=2.6592,
-    logit_bias_init=-10.0,
+    logit_scale_init=None,
+    logit_bias_init=None,
     canonicalize_text=False,
 ):
     """Build SigLIP2 model with preprocessing transforms and tokenizer.
@@ -243,8 +243,10 @@ def build_siglip2_model(
         freeze_vision_encoder: Freeze vision encoder parameters
         freeze_text_encoder: Freeze text encoder parameters
         image_size: Input image resolution (not used with HF processor)
-        logit_scale_init: Initial logit scale (log-space)
-        logit_bias_init: Initial logit bias
+        logit_scale_init: Optional initial logit scale override (log-space).
+            When None, inherit the learned value from the pretrained model.
+        logit_bias_init: Optional initial logit bias override. When None,
+            inherit the learned value from the pretrained model.
         canonicalize_text: Apply text canonicalization before tokenization
 
     Returns:
@@ -283,6 +285,14 @@ def build_siglip2_model(
 
     backbone_model = get_siglip2_model(backbone_version)
 
+    logit_scale_init, logit_bias_init = (
+        _resolve_siglip2_logit_calibration(
+            backbone_model,
+            logit_scale_init=logit_scale_init,
+            logit_bias_init=logit_bias_init,
+        )
+    )
+
     # Get processor for image transforms
     hf_model_name = model_config['hf_model']
     processor = AutoProcessor.from_pretrained(
@@ -315,6 +325,70 @@ def build_siglip2_model(
         )
 
     return model, preprocess_train, preprocess_val, tokenizer
+
+
+def _resolve_siglip2_logit_calibration(
+    backbone_model,
+    logit_scale_init=None,
+    logit_bias_init=None,
+):
+    """Resolve active SigLIP2 calibration from overrides or pretrained state.
+
+    Hugging Face SigLIP2 checkpoints contain learned ``logit_scale`` and
+    ``logit_bias`` parameters. The CLIP adapter owns the active training
+    copies, so copy the learned scalar values when the experiment does not
+    explicitly override them. Freeze the backbone copies because the adapter
+    forward does not consume them.
+
+    Args:
+        backbone_model: TAO SigLIP2 backbone with an ``inner`` HF model.
+        logit_scale_init: Optional explicit log-space scale override.
+        logit_bias_init: Optional explicit bias override.
+
+    Returns:
+        Tuple of resolved ``(logit_scale_init, logit_bias_init)`` floats.
+
+    Raises:
+        ValueError: If a required pretrained scalar is unavailable.
+    """
+    inner = getattr(backbone_model, "inner", None)
+
+    def _pretrained_scalar(name):
+        value = getattr(inner, name, None) if inner is not None else None
+        if value is None:
+            raise ValueError(
+                f"SigLIP2 pretrained model does not expose {name}; "
+                f"set model.init_{name} explicitly."
+            )
+        try:
+            return float(value.detach().item())
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"SigLIP2 pretrained {name} must be a scalar tensor, "
+                f"got {value!r}."
+            ) from exc
+
+    pretrained_scale = getattr(inner, "logit_scale", None)
+    pretrained_bias = getattr(inner, "logit_bias", None)
+    for parameter in (pretrained_scale, pretrained_bias):
+        if parameter is not None and hasattr(parameter, "requires_grad_"):
+            parameter.requires_grad_(False)
+
+    inherited_scale = logit_scale_init is None
+    inherited_bias = logit_bias_init is None
+    if inherited_scale:
+        logit_scale_init = _pretrained_scalar("logit_scale")
+    if inherited_bias:
+        logit_bias_init = _pretrained_scalar("logit_bias")
+
+    logging.info(
+        "SigLIP2 calibration: logit_scale=%.6f (%s), logit_bias=%.6f (%s)",
+        logit_scale_init,
+        "pretrained" if inherited_scale else "config override",
+        logit_bias_init,
+        "pretrained" if inherited_bias else "config override",
+    )
+    return float(logit_scale_init), float(logit_bias_init)
 
 
 def build_openclip_model(

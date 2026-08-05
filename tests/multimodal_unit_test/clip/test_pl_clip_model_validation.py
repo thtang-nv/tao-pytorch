@@ -37,6 +37,7 @@ from nvidia_tao_pytorch.multimodal.clip.model.pl_clip_model import (
     CLIPPlModel,
     _all_gather_variable_rows,
     _broadcast_pas_metrics,
+    _initial_logit_scale_ceiling,
 )
 
 
@@ -209,6 +210,18 @@ def _run_two_rank_pas_validation(rank, world_size, init_method):
 @pytest.mark.multimodal_unit
 class TestCLIPPASValidation:
     """Test opt-in exact PAS validation."""
+
+    def test_logit_ceiling_keeps_legacy_limit_for_lower_initialization(self):
+        """Ordinary CLIP initialization retains the historical exp=100 cap."""
+        assert _initial_logit_scale_ceiling(torch.tensor(2.3026)) == (
+            pytest.approx(pl_clip_model._MAX_LOGIT_SCALE)
+        )
+
+    def test_logit_ceiling_preserves_pretrained_siglip2_value(self):
+        """Pretrained SigLIP2 calibration is not truncated on the first step."""
+        assert _initial_logit_scale_ceiling(torch.tensor(4.6994)) == (
+            pytest.approx(4.6994)
+        )
 
     def test_metadata_match_eval_defaults_to_paired_validation(self):
         """Existing specs retain paired diagonal validation."""
