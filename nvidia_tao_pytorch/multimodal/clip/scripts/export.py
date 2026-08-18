@@ -26,6 +26,7 @@ from nvidia_tao_pytorch.config.clip.default_config import (
     CLIPExperimentConfig as ExperimentConfig,
 )
 from nvidia_tao_pytorch.multimodal.clip.model.pl_clip_model import CLIPPlModel
+from nvidia_tao_pytorch.multimodal.clip.model.lora import LoRALinear, merge_lora
 from nvidia_tao_pytorch.multimodal.clip.model.logit_calibration import (
     resolve_logit_bias_parameter,
     resolve_logit_scale_parameter,
@@ -801,6 +802,12 @@ def run_export(experiment_config: ExperimentConfig) -> None:
         )
         pl_model = CLIPPlModel(experiment_config)
         pl_model = pl_model.to(device)
+
+    if any(isinstance(module, LoRALinear) for module in pl_model.modules()):
+        logging.info(
+            "Merged %s LoRA modules into base weights for export.",
+            merge_lora(pl_model),
+        )
 
     # Replace nn.MultiheadAttention with export-friendly decomposed version.
     # PyTorch's fused _native_multi_head_attention has no ONNX symbolic, so

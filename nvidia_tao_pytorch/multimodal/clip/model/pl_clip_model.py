@@ -18,6 +18,7 @@ from nvidia_tao_pytorch.core.loggers import (  # noqa: E402
     api_logging as status_logging,
 )
 from nvidia_tao_pytorch.multimodal.clip.model.clip import build_model  # noqa: E402
+from nvidia_tao_pytorch.multimodal.clip.model.lora import inject_lora  # noqa: E402
 from nvidia_tao_pytorch.multimodal.clip.model.logit_calibration import (  # noqa: E402
     clamp_logit_scale_,
     preserve_logit_scale_ceiling_,
@@ -256,6 +257,12 @@ class CLIPPlModel(TAOLightningModule):
         )
         self.triplet_margin = getattr(
             self.experiment_spec.train, "triplet_margin", 0.2
+        )
+
+        peft_config = getattr(self.experiment_spec, 'peft', None)
+        self.lora_stats = (
+            inject_lora(self.model, peft_config)
+            if peft_config is not None and peft_config.enabled else None
         )
 
         # Check if retrieval validation is configured
@@ -531,13 +538,12 @@ class CLIPPlModel(TAOLightningModule):
         contrastive_loss = (
             loss['contrastive_loss'] if isinstance(loss, dict) else loss
         )
+        loss_value = contrastive_loss
         if self.triplet_loss_weight > 0:
             triplet_loss = _batch_hard_image_text_triplet_loss(
                 image_features, text_features, self.triplet_margin
             )
-            loss_value = (
-                contrastive_loss + self.triplet_loss_weight * triplet_loss
-            )
+            loss_value = loss_value + self.triplet_loss_weight * triplet_loss
             self.log(
                 "train/triplet_loss", triplet_loss,
                 on_step=True, on_epoch=True, prog_bar=False,
@@ -548,8 +554,6 @@ class CLIPPlModel(TAOLightningModule):
                 on_step=True, on_epoch=True, prog_bar=False,
                 sync_dist=True, batch_size=batch_size,
             )
-        else:
-            loss_value = contrastive_loss
         self.log(
             "train_loss", loss_value,
             on_step=True, on_epoch=True, prog_bar=True,
