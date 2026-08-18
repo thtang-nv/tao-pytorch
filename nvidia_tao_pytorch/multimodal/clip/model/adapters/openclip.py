@@ -185,6 +185,14 @@ class OpenCLIP(BaseCLIPAdapter):
         text_trainable = sum(p.numel() for p in text_params if p.requires_grad)
         return text_total, text_trainable
 
+    def get_encoder_blocks(self, tower):
+        """Return OpenCLIP transformer blocks for a tower."""
+        if tower == 'vision':
+            return list(self.backbone.model.visual.transformer.resblocks)
+        if tower == 'text':
+            return list(self.backbone.model.transformer.resblocks)
+        raise ValueError(f"Unknown tower: {tower}")
+
     def vision_named_parameters(self):
         """Return named parameters for the vision encoder."""
         for name, param in self.backbone.model.visual.named_parameters():

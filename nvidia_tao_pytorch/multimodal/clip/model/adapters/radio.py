@@ -231,6 +231,14 @@ class CRADIO(BaseCLIPAdapter):
             freeze_text=self.freeze_text_encoder,
         )
 
+    def get_encoder_blocks(self, tower):
+        """Return C-RADIO transformer blocks for a tower."""
+        if tower == 'vision':
+            return list(self.radio_model.model.blocks)
+        if tower == 'text':
+            return list(self.text_model.encoder.layers)
+        raise ValueError(f"Unknown tower: {tower}")
+
     # -- Parameter enumeration for per-tower optimizer groups --
 
     def vision_named_parameters(self):

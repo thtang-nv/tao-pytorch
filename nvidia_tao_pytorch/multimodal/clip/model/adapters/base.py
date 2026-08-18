@@ -147,6 +147,12 @@ class BaseCLIPAdapter(nn.Module, ABC):
         )
         logging.info(f"{model_name}\n{table}\n{logit_info}")
 
+    def get_encoder_blocks(self, tower: str):
+        """Return transformer blocks in forward order for LoRA injection."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement encoder blocks for {tower!r}."
+        )
+
     @abstractmethod
     def vision_named_parameters(self):
         """Return named parameters for the vision encoder.
