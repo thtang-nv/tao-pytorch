@@ -133,11 +133,17 @@ def inject_lora(model, peft_config):
             continue
 
         blocks = list(model.get_encoder_blocks(tower_name))
-        if tower_config.num_last_blocks == 0:
+        num_last_blocks = tower_config.num_last_blocks
+        if num_last_blocks < 0 or num_last_blocks > len(blocks):
+            raise ValueError(
+                f"PEFT {tower_name}.num_last_blocks must be between 0 "
+                f"(all blocks) and {len(blocks)}, got {num_last_blocks}."
+            )
+        if num_last_blocks == 0:
             target_blocks = blocks
             start_index = 0
         else:
-            target_blocks = blocks[-tower_config.num_last_blocks:]
+            target_blocks = blocks[-num_last_blocks:]
             start_index = len(blocks) - len(target_blocks)
 
         for offset, block in enumerate(target_blocks):
