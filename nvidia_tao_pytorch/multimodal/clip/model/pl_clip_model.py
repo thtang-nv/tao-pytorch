@@ -23,6 +23,9 @@ from nvidia_tao_pytorch.multimodal.clip.model.logit_calibration import (  # noqa
     clamp_logit_scale_,
     preserve_logit_scale_ceiling_,
 )
+from nvidia_tao_pytorch.multimodal.clip.model.preservation_loss import (  # noqa: E402
+    build_preservation_loss,
+)
 from nvidia_tao_pytorch.multimodal.clip.loss.masked_siglip_loss import (  # noqa: E402
     MetadataMaskedSigLipLoss,
 )
@@ -260,6 +263,13 @@ class CLIPPlModel(TAOLightningModule):
         )
 
         peft_config = getattr(self.experiment_spec, 'peft', None)
+        regularization_config = getattr(
+            self.experiment_spec, 'regularization', None
+        )
+        self.preservation_loss = (
+            build_preservation_loss(self.model, regularization_config)
+            if regularization_config is not None else None
+        )
         self.lora_stats = (
             inject_lora(self.model, peft_config)
             if peft_config is not None and peft_config.enabled else None
@@ -539,6 +549,26 @@ class CLIPPlModel(TAOLightningModule):
             loss['contrastive_loss'] if isinstance(loss, dict) else loss
         )
         loss_value = contrastive_loss
+        if self.preservation_loss is not None:
+            preservation_losses = self.preservation_loss(
+                image_features, text_features, batch[0], batch[1]
+            )
+            loss_value = loss_value + preservation_losses['preservation_total']
+            self.log(
+                "train/emb_mse_loss", preservation_losses['embedding_mse'],
+                on_step=True, on_epoch=True, prog_bar=False,
+                sync_dist=True, batch_size=batch_size,
+            )
+            self.log(
+                "train/cosine_loss", preservation_losses['cosine'],
+                on_step=True, on_epoch=True, prog_bar=False,
+                sync_dist=True, batch_size=batch_size,
+            )
+            self.log(
+                "train/sim_loss", preservation_losses['similarity'],
+                on_step=True, on_epoch=True, prog_bar=False,
+                sync_dist=True, batch_size=batch_size,
+            )
         if self.triplet_loss_weight > 0:
             triplet_loss = _batch_hard_image_text_triplet_loss(
                 image_features, text_features, self.triplet_margin
