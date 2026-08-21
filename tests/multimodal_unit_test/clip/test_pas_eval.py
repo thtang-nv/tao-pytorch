@@ -108,6 +108,7 @@ def _metric_row(
         "mAP": map_score,
         "Rank-1": map_score,
         "Rank-5": map_score,
+        "Rank-10": map_score,
         "Separability": map_score,
         "Match@5": map_score,
         "Zero@5": 1.0 - map_score,
@@ -151,6 +152,18 @@ def test_query_metrics_break_positive_negative_tie_by_gallery_order():
     assert metrics["rank1"] == 0.0
     assert metrics["ap"] == pytest.approx(0.5)
     assert metrics["auc"] == pytest.approx(0.5)
+
+
+@pytest.mark.multimodal_unit
+def test_query_metrics_report_rank10_independently_from_rank5():
+    metrics = pas._compute_query_metrics(
+        np.linspace(1.0, 0.0, 12),
+        gt_indices=[9],
+    )
+
+    assert metrics["first_pos"] == 10.0
+    assert metrics["rank5"] == 0.0
+    assert metrics["rank10"] == 1.0
 
 
 @pytest.mark.multimodal_unit

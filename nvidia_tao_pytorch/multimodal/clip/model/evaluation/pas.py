@@ -947,6 +947,7 @@ def _compute_query_metrics(
         "ap": average_precision,
         "rank1": float(positive_ranks[0] <= 1),
         "rank5": float(positive_ranks[0] <= 5),
+        "rank10": float(positive_ranks[0] <= 10),
         "auc": float(auc),
         "top_k_rate": float(top_k_rate),
         "zero_match": float(matches_in_top_k == 0),
@@ -970,6 +971,7 @@ def _finalize_metrics(
         "mAP": float(np.mean([metrics["ap"] for metrics in raw_metrics])),
         "Rank-1": float(np.mean([metrics["rank1"] for metrics in raw_metrics])),
         "Rank-5": float(np.mean([metrics["rank5"] for metrics in raw_metrics])),
+        "Rank-10": float(np.mean([metrics["rank10"] for metrics in raw_metrics])),
         "Separability": float(np.mean([metrics["auc"] for metrics in raw_metrics])),
         f"Match@{k}": float(
             np.mean([metrics["top_k_rate"] for metrics in raw_metrics])
@@ -1288,6 +1290,7 @@ def _metric_fieldnames(k: int) -> List[str]:
         "mAP",
         "Rank-1",
         "Rank-5",
+        "Rank-10",
         "Separability",
         f"Match@{k}",
         f"Zero@{k}",
