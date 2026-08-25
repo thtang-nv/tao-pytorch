@@ -1023,6 +1023,7 @@ def _evaluate_query_items(
     text_embeddings: Mapping[str, np.ndarray],
     description: str,
     k: int,
+    raw_query_metrics: Optional[List[Dict]] = None,
 ) -> Optional[Dict]:
     """Score one dataset/query-type slice in bounded query batches."""
     raw_metrics: List[Dict] = []
@@ -1036,12 +1037,24 @@ def _evaluate_query_items(
             [text_embeddings[caption] for caption, _ in batch_items]
         )
         similarities_batch = query_embeddings @ gallery_embeddings.T
-        for similarities, (_, ground_truth) in zip(
+        for similarities, (caption, ground_truth) in zip(
             similarities_batch, batch_items
         ):
             metrics = _compute_query_metrics(similarities, ground_truth, k=k)
             if metrics:
                 raw_metrics.append(metrics)
+                if raw_query_metrics is not None:
+                    raw_query_metrics.append(
+                        {
+                            "caption": caption,
+                            "ap": float(metrics["ap"]),
+                            "rank1": float(metrics["rank1"]),
+                            "rank5": float(metrics["rank5"]),
+                            "rank10": float(metrics["rank10"]),
+                            "first_pos": float(metrics["first_pos"]),
+                            "num_ground_truth": int(metrics["num_gt"]),
+                        }
+                    )
     return _finalize_metrics(raw_metrics, len(gallery_embeddings), k)
 
 
@@ -1140,6 +1153,7 @@ def evaluate_text_to_image_by_metadata(
     text_embeddings: Mapping[str, np.ndarray],
     k: int = PAS_K,
     ground_truth_mode: str = "scalar_attributes",
+    raw_metrics_by_subset: Optional[Dict[str, List[Dict]]] = None,
 ) -> List[Dict]:
     """Evaluate caption-deduplicated scalar/accessory PAS positives."""
     ground_truth_mode = _normalize_pas_ground_truth_mode(ground_truth_mode)
@@ -1228,12 +1242,14 @@ def evaluate_text_to_image_by_metadata(
                 if ground_truth:
                     query_items.append((caption, sorted(ground_truth)))
 
+            raw_query_metrics = [] if raw_metrics_by_subset is not None else None
             metrics = _evaluate_query_items(
                 query_items,
                 gallery_embeddings,
                 text_embeddings,
                 f"PAS metadata {dataset}/{query_type}",
                 k,
+                raw_query_metrics=raw_query_metrics,
             )
             if metrics is not None:
                 rows.append(
@@ -1244,6 +1260,11 @@ def evaluate_text_to_image_by_metadata(
                         **metrics,
                     }
                 )
+                if raw_metrics_by_subset is not None:
+                    subset_key = (
+                        f"<dataset>|{dataset}|<query_type>|{query_type}"
+                    )
+                    raw_metrics_by_subset[subset_key] = raw_query_metrics or []
     return rows
 
 
@@ -1253,6 +1274,7 @@ def evaluate_pas_metadata_embeddings(
     text_embeddings: Mapping[str, np.ndarray],
     ground_truth_mode: str,
     k: int = PAS_K,
+    raw_metrics_by_subset: Optional[Dict[str, List[Dict]]] = None,
 ) -> Dict[str, List[Dict]]:
     """Evaluate and aggregate metadata-compatible PAS embeddings."""
     rows = evaluate_text_to_image_by_metadata(
@@ -1261,6 +1283,7 @@ def evaluate_pas_metadata_embeddings(
         text_embeddings,
         k,
         ground_truth_mode=ground_truth_mode,
+        raw_metrics_by_subset=raw_metrics_by_subset,
     )
     dataset_names = _dataset_names_from_pairs(pairs)
     return {
@@ -1532,12 +1555,14 @@ def run_pas_evaluation(
         "paired_weighted_aggregate": paired_weighted,
     }
     if ground_truth_mode != "paired_caption":
+        metadata_raw_metrics: Dict[str, List[Dict]] = {}
         metadata_output = evaluate_pas_metadata_embeddings(
             pairs,
             image_embeddings,
             text_embeddings,
             ground_truth_mode=ground_truth_mode,
             k=PAS_K,
+            raw_metrics_by_subset=metadata_raw_metrics,
         )
         for suffix, key in (
             ("", "metadata"),
@@ -1549,6 +1574,12 @@ def run_pas_evaluation(
                 metadata_output[key],
                 PAS_K,
             )
+        with open(
+            results_dir / "nvidia_pas_metadata_raw_t2i_metrics.json",
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(metadata_raw_metrics, file)
         output.update(metadata_output)
     logging.info("PAS TAO-FT evaluation finished.")
     return output

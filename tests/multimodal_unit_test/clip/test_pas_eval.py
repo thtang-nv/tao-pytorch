@@ -325,6 +325,48 @@ def test_metadata_eval_deduplicates_caption_and_unions_signatures():
 
 
 @pytest.mark.multimodal_unit
+def test_metadata_eval_records_raw_per_query_metrics():
+    pairs = [
+        PasPair(
+            dataset="D",
+            query_type="hard",
+            caption=f"query {index}",
+            unique_name=f"img{index}.jpg",
+            image_path=f"images/D/img{index}.jpg",
+            prepared_image_path=Path(f"img{index}.jpg"),
+            image_attr_values=(index + 1,),
+            text_attr_values=(index + 1,),
+        )
+        for index in range(2)
+    ]
+    image_embeddings = {
+        f"D\timages/D/img{index}.jpg": np.eye(2, dtype=np.float32)[index]
+        for index in range(2)
+    }
+    text_embeddings = {
+        f"query {index}": np.eye(2, dtype=np.float32)[index] for index in range(2)
+    }
+    raw_metrics = {}
+
+    rows = evaluate_text_to_image_by_metadata(
+        pairs,
+        image_embeddings,
+        text_embeddings,
+        ground_truth_mode="scalar_plus_accessories",
+        raw_metrics_by_subset=raw_metrics,
+    )
+
+    subset = raw_metrics["<dataset>|D|<query_type>|hard"]
+    assert rows[0]["num_queries"] == 2
+    assert [item["caption"] for item in subset] == ["query 0", "query 1"]
+    assert all(item["ap"] == pytest.approx(1.0) for item in subset)
+    assert all(item["rank1"] == pytest.approx(1.0) for item in subset)
+    assert all(item["rank5"] == pytest.approx(1.0) for item in subset)
+    assert all(item["rank10"] == pytest.approx(1.0) for item in subset)
+    assert all(item["num_ground_truth"] == 1 for item in subset)
+
+
+@pytest.mark.multimodal_unit
 def test_easy_query_ground_truth_modes_remain_separate():
     pairs = [
         PasPair(
