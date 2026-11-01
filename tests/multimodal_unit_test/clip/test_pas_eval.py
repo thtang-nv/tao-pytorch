@@ -131,7 +131,7 @@ def test_inference_config_excludes_pas_ground_truth_mode():
 
 @pytest.mark.multimodal_unit
 def test_query_metrics_assign_unique_ranks_to_tied_positives():
-    metrics = pas._compute_query_metrics(
+    metrics, _ = pas._compute_query_metrics(
         np.array([0.8, 0.8, 0.2]),
         gt_indices=[0, 1],
     )
@@ -143,7 +143,7 @@ def test_query_metrics_assign_unique_ranks_to_tied_positives():
 
 @pytest.mark.multimodal_unit
 def test_query_metrics_break_positive_negative_tie_by_gallery_order():
-    metrics = pas._compute_query_metrics(
+    metrics, _ = pas._compute_query_metrics(
         np.array([0.8, 0.8, 0.2]),
         gt_indices=[1],
     )
@@ -156,7 +156,7 @@ def test_query_metrics_break_positive_negative_tie_by_gallery_order():
 
 @pytest.mark.multimodal_unit
 def test_query_metrics_report_rank10_independently_from_rank5():
-    metrics = pas._compute_query_metrics(
+    metrics, _ = pas._compute_query_metrics(
         np.linspace(1.0, 0.0, 12),
         gt_indices=[9],
     )
@@ -249,13 +249,13 @@ def test_metadata_eval_filters_matches_by_required_accessories():
         for index, pair in enumerate(pairs)
     }
 
-    scalar_rows = evaluate_text_to_image_by_metadata(
+    scalar_rows, _ = evaluate_text_to_image_by_metadata(
         pairs,
         image_embeddings,
         text_embeddings,
         ground_truth_mode="scalar_attributes",
     )
-    accessory_rows = evaluate_text_to_image_by_metadata(
+    accessory_rows, _ = evaluate_text_to_image_by_metadata(
         pairs,
         image_embeddings,
         text_embeddings,
@@ -311,7 +311,7 @@ def test_metadata_eval_deduplicates_caption_and_unions_signatures():
         for index in range(3)
     }
 
-    rows = evaluate_text_to_image_by_metadata(
+    rows, raw_metrics_elaborate = evaluate_text_to_image_by_metadata(
         pairs,
         image_embeddings,
         {
@@ -322,48 +322,13 @@ def test_metadata_eval_deduplicates_caption_and_unions_signatures():
 
     assert rows[0]["num_queries"] == 1
     assert rows[0]["avg_gt_per_query"] == pytest.approx(3.0)
-
-
-@pytest.mark.multimodal_unit
-def test_metadata_eval_records_raw_per_query_metrics():
-    pairs = [
-        PasPair(
-            dataset="D",
-            query_type="hard",
-            caption=f"query {index}",
-            unique_name=f"img{index}.jpg",
-            image_path=f"images/D/img{index}.jpg",
-            prepared_image_path=Path(f"img{index}.jpg"),
-            image_attr_values=(index + 1,),
-            text_attr_values=(index + 1,),
-        )
-        for index in range(2)
-    ]
-    image_embeddings = {
-        f"D\timages/D/img{index}.jpg": np.eye(2, dtype=np.float32)[index]
-        for index in range(2)
-    }
-    text_embeddings = {
-        f"query {index}": np.eye(2, dtype=np.float32)[index] for index in range(2)
-    }
-    raw_metrics = {}
-
-    rows = evaluate_text_to_image_by_metadata(
-        pairs,
-        image_embeddings,
-        text_embeddings,
-        ground_truth_mode="scalar_plus_accessories",
-        raw_metrics_by_subset=raw_metrics,
-    )
-
-    subset = raw_metrics["<dataset>|D|<query_type>|hard"]
-    assert rows[0]["num_queries"] == 2
-    assert [item["caption"] for item in subset] == ["query 0", "query 1"]
-    assert all(item["ap"] == pytest.approx(1.0) for item in subset)
-    assert all(item["rank1"] == pytest.approx(1.0) for item in subset)
-    assert all(item["rank5"] == pytest.approx(1.0) for item in subset)
-    assert all(item["rank10"] == pytest.approx(1.0) for item in subset)
-    assert all(item["num_ground_truth"] == 1 for item in subset)
+    artifacts = raw_metrics_elaborate["<dataset>|D|<query_type>|hard"]
+    assert len(artifacts) == 1
+    assert artifacts[0]["caption"] == "person carrying an item"
+    assert artifacts[0]["attributes"] == (1,)
+    assert artifacts[0]["gt_imgs"] == ["img0.jpg", "img1.jpg", "img2.jpg"]
+    assert artifacts[0]["gt_ranks"] == [1.0, 2.0, 3.0]
+    assert artifacts[0]["ap"] == pytest.approx(1.0)
 
 
 @pytest.mark.multimodal_unit
@@ -391,14 +356,18 @@ def test_easy_query_ground_truth_modes_remain_separate():
         f"easy query {index}": np.eye(2, dtype=np.float32)[index] for index in range(2)
     }
 
-    paired = evaluate_text_to_image(pairs, image_embeddings, text_embeddings)
-    scalar = evaluate_text_to_image_by_metadata(
+    paired, paired_raw_metrics = evaluate_text_to_image(
+        pairs,
+        image_embeddings,
+        text_embeddings,
+    )
+    scalar, _ = evaluate_text_to_image_by_metadata(
         pairs,
         image_embeddings,
         text_embeddings,
         ground_truth_mode="scalar_attributes",
     )
-    accessory = evaluate_text_to_image_by_metadata(
+    accessory, _ = evaluate_text_to_image_by_metadata(
         pairs,
         image_embeddings,
         text_embeddings,
@@ -408,6 +377,83 @@ def test_easy_query_ground_truth_modes_remain_separate():
     assert paired[0]["avg_gt_per_query"] == pytest.approx(1.0)
     assert scalar[0]["avg_gt_per_query"] == pytest.approx(2.0)
     assert accessory == scalar
+    paired_artifacts = paired_raw_metrics["<dataset>|D|<query_type>|easy"]
+    assert [item["gt_imgs"] for item in paired_artifacts] == [
+        ["img0.jpg"],
+        ["img1.jpg"],
+    ]
+    assert all(item["gt_ranks"] == [1.0] for item in paired_artifacts)
+
+
+@pytest.mark.multimodal_unit
+def test_run_pas_evaluation_writes_paired_and_metadata_raw_artifacts(
+    tmp_path,
+    monkeypatch,
+):
+    pairs = [
+        PasPair(
+            dataset="D",
+            query_type="hard",
+            caption="query one",
+            unique_name="img0.jpg",
+            image_path="images/D/img0.jpg",
+            prepared_image_path=Path("img0.jpg"),
+            image_attr_values=(1,),
+            text_attr_values=(1,),
+        ),
+        PasPair(
+            dataset="D",
+            query_type="hard",
+            caption="query two",
+            unique_name="img1.jpg",
+            image_path="images/D/img1.jpg",
+            prepared_image_path=Path("img1.jpg"),
+            image_attr_values=(1,),
+            text_attr_values=(1,),
+        ),
+    ]
+    image_embeddings = {
+        "D\timages/D/img0.jpg": np.array([1.0, 0.0], dtype=np.float32),
+        "D\timages/D/img1.jpg": np.array([0.0, 1.0], dtype=np.float32),
+    }
+    text_embeddings = {
+        "query one": np.array([1.0, 0.0], dtype=np.float32),
+        "query two": np.array([0.0, 1.0], dtype=np.float32),
+    }
+    monkeypatch.setattr(
+        pas,
+        "_extract_image_embeddings",
+        lambda *args: image_embeddings,
+    )
+    monkeypatch.setattr(
+        pas,
+        "_extract_text_embeddings",
+        lambda *args: text_embeddings,
+    )
+    config = SimpleNamespace(
+        evaluate=SimpleNamespace(
+            results_dir=str(tmp_path),
+            batch_size=1,
+            num_workers=0,
+            gpu_ids=[],
+            pas_ground_truth_mode="scalar_attributes",
+        )
+    )
+    model = SimpleNamespace(to=lambda device: None)
+
+    pas.run_pas_evaluation(config, model, pairs)
+
+    paired_raw = json.loads(
+        (tmp_path / "nvidia_pas_raw_t2i_metrics.json").read_text()
+    )
+    metadata_raw = json.loads(
+        (tmp_path / "nvidia_pas_metadata_raw_t2i_metrics.json").read_text()
+    )
+    subset_key = "<dataset>|D|<query_type>|hard"
+    assert paired_raw[subset_key][0]["gt_imgs"] == ["img0.jpg"]
+    assert metadata_raw[subset_key][0]["gt_imgs"] == ["img0.jpg", "img1.jpg"]
+    assert metadata_raw[subset_key][0]["attributes"] == [1]
+    assert metadata_raw[subset_key][0]["gt_ranks"] == [1.0, 2.0]
 
 
 @pytest.mark.multimodal_unit
