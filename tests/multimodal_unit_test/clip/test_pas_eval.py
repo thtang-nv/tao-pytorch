@@ -108,6 +108,7 @@ def _metric_row(
         "mAP": map_score,
         "Rank-1": map_score,
         "Rank-5": map_score,
+        "Rank-10": map_score,
         "Separability": map_score,
         "Match@5": map_score,
         "Zero@5": 1.0 - map_score,
@@ -151,6 +152,18 @@ def test_query_metrics_break_positive_negative_tie_by_gallery_order():
     assert metrics["rank1"] == 0.0
     assert metrics["ap"] == pytest.approx(0.5)
     assert metrics["auc"] == pytest.approx(0.5)
+
+
+@pytest.mark.multimodal_unit
+def test_query_metrics_report_rank10_independently_from_rank5():
+    metrics = pas._compute_query_metrics(
+        np.linspace(1.0, 0.0, 12),
+        gt_indices=[9],
+    )
+
+    assert metrics["first_pos"] == 10.0
+    assert metrics["rank5"] == 0.0
+    assert metrics["rank10"] == 1.0
 
 
 @pytest.mark.multimodal_unit
@@ -309,6 +322,48 @@ def test_metadata_eval_deduplicates_caption_and_unions_signatures():
 
     assert rows[0]["num_queries"] == 1
     assert rows[0]["avg_gt_per_query"] == pytest.approx(3.0)
+
+
+@pytest.mark.multimodal_unit
+def test_metadata_eval_records_raw_per_query_metrics():
+    pairs = [
+        PasPair(
+            dataset="D",
+            query_type="hard",
+            caption=f"query {index}",
+            unique_name=f"img{index}.jpg",
+            image_path=f"images/D/img{index}.jpg",
+            prepared_image_path=Path(f"img{index}.jpg"),
+            image_attr_values=(index + 1,),
+            text_attr_values=(index + 1,),
+        )
+        for index in range(2)
+    ]
+    image_embeddings = {
+        f"D\timages/D/img{index}.jpg": np.eye(2, dtype=np.float32)[index]
+        for index in range(2)
+    }
+    text_embeddings = {
+        f"query {index}": np.eye(2, dtype=np.float32)[index] for index in range(2)
+    }
+    raw_metrics = {}
+
+    rows = evaluate_text_to_image_by_metadata(
+        pairs,
+        image_embeddings,
+        text_embeddings,
+        ground_truth_mode="scalar_plus_accessories",
+        raw_metrics_by_subset=raw_metrics,
+    )
+
+    subset = raw_metrics["<dataset>|D|<query_type>|hard"]
+    assert rows[0]["num_queries"] == 2
+    assert [item["caption"] for item in subset] == ["query 0", "query 1"]
+    assert all(item["ap"] == pytest.approx(1.0) for item in subset)
+    assert all(item["rank1"] == pytest.approx(1.0) for item in subset)
+    assert all(item["rank5"] == pytest.approx(1.0) for item in subset)
+    assert all(item["rank10"] == pytest.approx(1.0) for item in subset)
+    assert all(item["num_ground_truth"] == 1 for item in subset)
 
 
 @pytest.mark.multimodal_unit
